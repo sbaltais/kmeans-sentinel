@@ -1,0 +1,85 @@
+# The purpose of this R script is to perform an unsupervised k-means classification on Sentinel-2 imagery for the Eyre Bird Observatory area. The script loads three Landsat bands (Red, Green, Blue), processes them to create a composite raster, clips the raster to a 3km buffer around the Eyre Bird Observatory coordinates, and then applies k-means clustering to classify the land cover into 6 distinct classes. Finally, it visualizes the results using ggplot2 and saves the plot as a PNG file.
+# R script uses three inputed Sentinel-2 bands, converts them to a raster, clips them based on the Eyre Bird
+# Observatory coordinates, and then runs a k-means classification on the clipped raster. Finally, it plots the results and
+# saves the plot as a PNG file. Make sure to adjust file paths and band names as needed for your specific dataset and setup.
+
+# install the terra package if you haven't already, and load it
+#install.packages("terra","ggplot2")
+library(terra)
+library(ggplot2)
+
+
+
+#set working directory to where your Landsat bands are stored
+setwd("/home/si/gdrive/landsat/Working")
+
+# ensure you are working from correct directory
+x <-getwd()
+print(x)
+
+
+# --- 1. SETUP PATHS ---
+# Replace these with your actual file paths
+ls_red_path <- "2026-05-18-00:00_2026-05-18-23:59_Sentinel-2_L2A_B08_(Raw).tiff" # Landsat 8 Red
+ls_grn_path <- "2026-05-18-00:00_2026-05-18-23:59_Sentinel-2_L2A_B04_(Raw).tiff" # Landsat 8 Green
+ls_blu_path <- "2026-05-18-00:00_2026-05-18-23:59_Sentinel-2_L2A_B03_(Raw).tiff" # Landsat 8 Blue
+
+# --- 2. LOAD & SPATIAL HARMONIZATION ---
+# Load Sentinel as the 'Master' template (10m resolution)
+
+ls_red <- rast(ls_red_path)
+ls_grn <- rast(ls_grn_path)
+ls_blu <- rast(ls_blu_path)
+
+print("Sentinel bands loaded.")
+
+
+# --- 4. CLIPPING TO EYRE BIRD OBSERVATORY ---
+# Coordinates: 32°14′47″S 126°18′06″E
+eyre_coords <- matrix(c(126.3017, -32.2464), ncol=2)
+eyre_point <- vect(eyre_coords, crs="EPSG:4326")
+
+# Project point to match imagery CRS then buffer by 3km
+eyre_proj <- project(eyre_point, crs(ls_red))
+eyre_buffer <- buffer(eyre_proj, width=3000)
+
+# Create Composite and Clip
+composite <- c(ls_red, ls_grn, ls_blu) # Add more bands as needed
+names(composite) <- c("L_Red", "L_Green", "L_Blue")
+
+img_clipped <- crop(composite, eyre_buffer, mask=TRUE)
+
+# --- 5. K-MEANS CLASSIFICATION ---
+# Convert to dataframe, removing NAs (pixels outside the 3km circle)
+img_df <- as.data.frame(img_clipped, cells=TRUE, na.rm=TRUE)
+
+# Run K-means with 6 clusters
+set.seed(123) # For reproducibility
+k_results <- kmeans(img_df[, -1], centers=6, iter.max=100, nstart=10)
+
+# Create a blank raster and fill with cluster results
+km_raster <- rast(img_clipped, nlyr=1)
+km_raster[img_df$cell] <- k_results$cluster
+
+print("kmeans completed.")
+
+# --- 6. PLOT RESULTS ---
+num_clusters <- 6
+
+# Open a new GUI plotting window for screen display
+x11()
+plot(
+  km_raster,
+  col = terrain.colors(num_clusters),
+  main = "Sentinel-2 6-Class K-means: Eyre Bird Observatory"
+)
+
+# Save the same plot to a PNG file
+png_filename <- "Sentinel-2-kmeans.png"
+png(filename = png_filename, width = 6, height = 4, units = "in", res = 300)
+plot(
+  km_raster,
+  col = terrain.colors(num_clusters),
+  main = "Sentinel-2 6-Class K-means: Eyre Bird Observatory"
+)
+dev.off()
